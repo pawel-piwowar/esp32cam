@@ -18,7 +18,7 @@ esp_deep_sleep_start();
 ```
 rtc_gpio_hold_en() function is used to prevent state change of pin used to control power of GSM module. 
 Without this setting GSM can still be active after sending "AT+CPOF" command. 
-Then we need to activate this pin again when Esp32Cam is active again using command : "rtc_gpio_hold_dis(GPIO_NUM_2);"
+We need to activate this pin when Esp32Cam wakes up using command : "rtc_gpio_hold_dis(GPIO_NUM_2);"
 
 Esp32 Cam pins 14 and 15 are connected to SIM7600 RXD and TXD PINS allowing serial communication between camara and GSM module.
 Serial communication is started with code:
