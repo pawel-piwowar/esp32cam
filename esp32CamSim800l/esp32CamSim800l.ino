@@ -103,11 +103,15 @@ void loop() {
         Serial.println("Cannot take photo" );
         goToSleep();
   }
-  sim800lClient.resetGsm(GSM_RESET_PIN);
+  
   if (! sim800lClient.waitForGsmNetwork()) {
+    sim800lClient.resetGsm(GSM_RESET_PIN);
+    if (! sim800lClient.waitForGsmNetwork()) {
       Serial.println("Cannot register to GSM network" );
       goToSleep();
+    }
   }
+
   sendPhoto();
   goToSleep();
 }  
@@ -136,7 +140,7 @@ boolean capturePhotoSaveLITTLEFS( void ) {
     else {
       file.write(fb->buf, fb->len); // payload (image), payload length
       Serial.print("The picture has been saved in ");
-      Serial.print(FILE_PHOTO);
+      Serial.println(FILE_PHOTO);
     }
     // Close the file
     file.close();
