@@ -6,8 +6,8 @@
 #include "ftpParams.h"
 #include "Sim800lClient.h"
 
-#define uS_TO_S_FACTOR 1000000    //Conversion factor for micro seconds to seconds
-#define TIME_TO_SLEEP  600        //Time ESP32 will go to sleep (in seconds)
+#define uS_TO_M_FACTOR 60000000ULL    //Conversion factor for micro seconds to minutes
+#define TIME_TO_SLEEP_MINUTES  60         //Time ESP32 will go to sleep (in minutes)
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -92,8 +92,8 @@ void setup() {
     return;
   }
 
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) +  " Seconds");
+  Serial.println("Setting up ESP32 to sleep every " + String(TIME_TO_SLEEP_MINUTES) +  " minutes");
+  esp_sleep_enable_timer_wakeup(uS_TO_M_FACTOR * TIME_TO_SLEEP_MINUTES);
 }
 
 void loop() {
@@ -150,13 +150,21 @@ boolean capturePhotoSaveLITTLEFS( void ) {
 
 boolean sendPhoto(){
   String imageFileName = String(millis()) + ".jpg";;
-  if (! sim800lClient.initFtp(ftpServerAddress, ftpServerPort, ftpUser, ftpPassword)) {
-    Serial.println("Error while connecting to FTP");
-    return false;
-  };
+
+  boolean initResult = false;
+  int initRetries = 3;
+  while (! initResult && initRetries >= 0) {
+       initResult = sim800lClient.initFtp(ftpServerAddress, ftpServerPort, ftpUser, ftpPassword);
+       initRetries --;
+       if (! initResult) {
+          Serial.println("Error while connecting to FTP");
+          sim800lClient.stopFtp();
+       }   
+  }
+  
   boolean ftpResult = false;
   int retries = 3;
-  while (! ftpResult && retries >= 0) {     
+  while (! ftpResult && retries >= 0) {  
       ftpResult = sim800lClient.sendFileToFtp(FILE_PHOTO, imageFileName);
       retries--;
       if(! ftpResult){
@@ -164,6 +172,7 @@ boolean sendPhoto(){
        Serial.println(retries); 
       }
     }
+    
   sim800lClient.stopFtp();
   if (ftpResult){
     return true;
@@ -174,7 +183,7 @@ boolean sendPhoto(){
 }
 
 void goToSleep(){
-  Serial.print("Going to sleep for " + String(TIME_TO_SLEEP) + " seconds" );
+  Serial.print("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
   sim800lClient.goToSleep();
   rtc_gpio_hold_en(GPIO_NUM_2);
   esp_deep_sleep_start();
