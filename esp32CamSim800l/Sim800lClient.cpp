@@ -15,7 +15,8 @@ boolean Sim800lClient::waitForGsmNetwork(){
   sendATcommand("AT","OK", 5000);
   String result;
   for (int i=1; i < 10; i++){ //Try 10 times…
-      result = sendATcommand("AT+CREG?","+CREG: 0,1", 2000);
+      Serial.println("Waiting for network, attempt " + String(i) );
+      result = sendATcommand("AT+CREG?","+CREG: 0,1", 5000);
       if (result.indexOf("+CREG: 0,1") > 0) {
         return true;
       }
@@ -25,7 +26,7 @@ boolean Sim800lClient::waitForGsmNetwork(){
 }
 
 boolean Sim800lClient::goToSleep(){
-  String result = sendATcommand("AT+CSCLK=2","OK", 1000);
+  String result = sendATcommand("AT+CSCLK=2","OK", 5000);
   if (result.indexOf("OK") <= 0) {
       Serial.println("Cannot set SIM800l to sleep mode");
       return false;
@@ -161,21 +162,27 @@ String Sim800lClient::readLineFromSerial(String stringToRead, unsigned long time
     String result;
     unsigned long startTime = millis();
     boolean ok = false;
-    Serial.print("Received: ");
-    while (!ok & millis() - startTime < timeoutMillis) {
+    boolean timeoutReached = false;
+    Serial.println("Received: ");
+    while (!ok & !timeoutReached) {
      if (Serial2.available()) {
        String s = Serial2.readString();
        ok = s.indexOf(stringToRead) > 0;
        Serial.print(s);
        result += s;  // append to the result string
      }
+     timeoutReached = millis() - startTime > timeoutMillis;
    }
+   if (timeoutReached) {
+      Serial.println("Timeout detected after wating for " + String(timeoutMillis) + " milliseconds");
+   } 
    return result;
   }
 
 String Sim800lClient::sendATcommand(String toSend, String expectedResponse, unsigned long milliseconds) {
-  Serial.print("Sending AT command: ");
-  Serial.println(toSend);
+  Serial.println("Sending AT command: [" + toSend + "]" 
+    + " , expect : [" + expectedResponse + "]" 
+    + " in " + String(milliseconds) + " milliseconds");
   Serial2.println(toSend);
   String result = readLineFromSerial(expectedResponse, milliseconds);
 return result;

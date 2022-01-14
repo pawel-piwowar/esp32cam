@@ -7,7 +7,7 @@
 #include "Sim800lClient.h"
 
 #define uS_TO_M_FACTOR 60000000ULL    //Conversion factor for micro seconds to minutes
-#define TIME_TO_SLEEP_MINUTES  60         //Time ESP32 will go to sleep (in minutes)
+#define TIME_TO_SLEEP_MINUTES  20     //Time ESP32 will go to sleep (in minutes)
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -177,14 +177,15 @@ boolean sendPhoto(){
   if (ftpResult){
     return true;
   } else {
-    Serial.print("Cannot send file to FTP");
+    Serial.println("Cannot send file to FTP");
      return false;
   }
 }
 
 void goToSleep(){
-  Serial.print("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
+  Serial.println("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
   sim800lClient.goToSleep();
   rtc_gpio_hold_en(GPIO_NUM_2);
+  Serial.println("Sleep mode activated");
   esp_deep_sleep_start();
 }
