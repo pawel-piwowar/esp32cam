@@ -4,7 +4,7 @@ Sim800lClient::Sim800lClient(void){
   }
 
 void Sim800lClient::resetGsm(int resetPinNum){
-      Serial.println("Reseting GSM module ...");
+      Serial.println("Resetting GSM module ...");
       digitalWrite(resetPinNum, LOW);
           delay(500);
       digitalWrite(resetPinNum, HIGH);  
@@ -71,8 +71,6 @@ void Sim800lClient::stopFtp(void){
 }
 
 boolean Sim800lClient::sendFileToFtp(camera_fb_t * fb, String remoteFileName){
-
-  
   String response = sendATcommand(String("AT+FTPPUTNAME=") + remoteFileName ,"OK",2000);
   response = sendATcommand("AT+FTPCID=1" ,"OK",2000);
   response = sendATcommand("AT+FTPPUTPATH=\"/\"" ,"OK",2000);
@@ -149,7 +147,7 @@ String Sim800lClient::readLineFromSerial(String stringToRead, unsigned long time
      timeoutReached = millis() - startTime > timeoutMillis;
    }
    if (timeoutReached) {
-      Serial.println("Timeout detected after wating for " + String(timeoutMillis) + " milliseconds");
+      Serial.println("Timeout detected after waiting for " + String(timeoutMillis) + " milliseconds");
    } 
    return result;
   }
