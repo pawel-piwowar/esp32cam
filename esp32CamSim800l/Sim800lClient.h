@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <LITTLEFS.h>
+#include "esp_camera.h"
 
 class Sim800lClient
 {
@@ -8,8 +8,7 @@ class Sim800lClient
       int ftpServerPort;
       String ftpUser;
       String ftpPassword;
-
-      int sendDataPage(File dataFile, int len);
+      boolean sendDataPage(uint8_t *fbBuf, size_t bufLength);
       String readLineFromSerial(String stringToRead, unsigned long timeoutMillis);
       String sendATcommand(String toSend, String expectedResponse, unsigned long milliseconds); 
       void blinkRed(int count, int onTime, int offTime);
@@ -20,5 +19,5 @@ class Sim800lClient
       boolean goToSleep();
       boolean initFtp(String _ftpServerAddress, int _ftpServerPort, String _ftpUser, String _ftpPassword);
       void stopFtp(void);
-      boolean sendFileToFtp(String localFileName, String remoteFileName);
+      boolean sendFileToFtp(camera_fb_t * fb, String remoteFileName);
 };

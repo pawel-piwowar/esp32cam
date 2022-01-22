@@ -70,15 +70,8 @@ void Sim800lClient::stopFtp(void){
   }
 }
 
-boolean Sim800lClient::sendFileToFtp(String localFileName, String remoteFileName){
+boolean Sim800lClient::sendFileToFtp(camera_fb_t * fb, String remoteFileName){
 
-   Serial.print("Start reading file from LITTLEFS , file name: ");
-   Serial.println(localFileName);
-   File dataFile = LITTLEFS.open(localFileName, FILE_READ);
-   Serial.println("File opened");
-   int len = dataFile.size();
-   Serial.print("File length: ");
-   Serial.println(len);
   
   String response = sendATcommand(String("AT+FTPPUTNAME=") + remoteFileName ,"OK",2000);
   response = sendATcommand("AT+FTPCID=1" ,"OK",2000);
@@ -93,69 +86,51 @@ boolean Sim800lClient::sendFileToFtp(String localFileName, String remoteFileName
     }
   String maxLengthString = response.substring(putOkRespIndex + putOkResp.length());
   int bufLength = maxLengthString.toInt();
-  Serial.println("Data buffer lenght : " + String(bufLength));
-  int remainingBytes = len;
-  int bytesToSend = 0;
-  unsigned long startTime = millis();
-  int page = 0;
-  int timeout = 1000000;
-  boolean timeoutOccurred = false;
-  do {  
-    if (remainingBytes >= bufLength ) {
-      bytesToSend = bufLength;
-    } else {
-      bytesToSend = remainingBytes;
-    }    
-    int bytesSent = sendDataPage(dataFile, bytesToSend);
-    page++;
-    if (bytesSent < 0) {
-      Serial.println("Error transferring data");
-      return false;
-    }
-    remainingBytes = remainingBytes - bytesSent;
-    Serial.println("Page number: " + String(page));    
-    Serial.println("Remaining bytes : " + String(remainingBytes));
-    timeoutOccurred = (millis() - startTime > timeout);
-  } while (remainingBytes > 0  &&  !timeoutOccurred);
 
-  if (timeoutOccurred) {
-    Serial.println("Timeout sending file after miliseconds : " + String(timeout));
-    }
+    uint8_t *fbBuf = fb->buf;
+    size_t fbLen = fb->len;
+    int page=0;
+
+    Serial.println("Data length : " + String(fbLen));
+    Serial.println("Data buffer length : " + String(bufLength));
+    
+    for (size_t n=0; n<fbLen; n=n+bufLength) {
+      page++;
+      if ( n+bufLength > fbLen ) {
+        bufLength = fbLen%bufLength;
+      }
+      if (! sendDataPage(fbBuf, bufLength)) {
+           return false;
+       }
+      fbBuf += bufLength;
+      Serial.println("Page no: " + String(page) + " sent, bytes: " + String(n+bufLength) + "/" + fbLen);
+      String sendResp = readLineFromSerial("OK", 60000);
+      if (sendResp.indexOf("OK") <= 0 ) {
+        Serial.println("Page NOT confirmed, reporting error"); 
+        return false;
+      }  
+    }   
 
   response = sendATcommand(String("AT+FTPPUT=2,0"),"OK", 5000); 
   if (response.indexOf("OK") <= 0) {
-      dataFile.close();
       Serial.println("Error while closing FTP transfer");
       return false;
   }
-  dataFile.close();
+  Serial.println("Picture sent to FTP");
   blinkRed(1, 1000, 0);
   return true;
 
 }
 
-int Sim800lClient::sendDataPage(File dataFile, int len){
-    Serial.println(String("Sending next page of data with length: ") + String(len));
-    int counter = 0;
-    String response = sendATcommand(String("AT+FTPPUT=2,") + len, String("+FTPPUT: 2,") + len,5000); 
-    if (response.indexOf("+FTPPUT: 2,") <= 0) {
-      return -1;
-      }
-    while (counter < len) {
-        Serial2.write(dataFile.read());
-        counter++; 
-    } 
-   Serial.println(String("Transferred bytes: ") + String(counter));
-   Serial.println("Waiting for page confirmation");
-   String sendResp = readLineFromSerial("OK", 60000);
-   if (sendResp.indexOf("OK") <= 0 ) {
-     Serial.println("Page NOT confirmed, reporting error"); 
-     return -1;
-    }
-   Serial.println("Page confirmed"); 
-   blinkRed(2, 50, 50);
-   return counter;  
-  }
+boolean Sim800lClient::sendDataPage(uint8_t *fbBuf, size_t len){
+   Serial.println(String("Sending next page of data with length: ") + String(len));
+   String response = sendATcommand(String("AT+FTPPUT=2,") + len, String("+FTPPUT: 2,") + len,5000); 
+   if (response.indexOf("+FTPPUT: 2,") <= 0) {
+      Serial.println("Error sending data page"); 
+      return false;
+   }
+   Serial2.write(fbBuf, len);
+}
 
 
 String Sim800lClient::readLineFromSerial(String stringToRead, unsigned long timeoutMillis){
@@ -163,7 +138,7 @@ String Sim800lClient::readLineFromSerial(String stringToRead, unsigned long time
     unsigned long startTime = millis();
     boolean ok = false;
     boolean timeoutReached = false;
-    Serial.println("Received: ");
+    Serial.print("Received: ");
     while (!ok & !timeoutReached) {
      if (Serial2.available()) {
        String s = Serial2.readString();

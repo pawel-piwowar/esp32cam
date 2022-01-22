@@ -2,12 +2,11 @@
 #include "SPI.h"
 #include "driver/rtc_io.h"
 #include <FS.h>
-#include <LITTLEFS.h>
 #include "ftpParams.h"
 #include "Sim800lClient.h"
 
 #define uS_TO_M_FACTOR 60000000ULL    //Conversion factor for micro seconds to minutes
-#define TIME_TO_SLEEP_MINUTES  20     //Time ESP32 will go to sleep (in minutes)
+#define TIME_TO_SLEEP_MINUTES  10     //Time ESP32 will go to sleep (in minutes)
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -33,8 +32,6 @@
   #error "Camera model not selected"
 #endif
 
-// Photo File Name to save in LITTLEFS
-#define FILE_PHOTO "/photo.jpg"
 int GSM_RESET_PIN = 2;
 Sim800lClient sim800lClient;
 
@@ -50,15 +47,6 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
   
-  if (!LITTLEFS.begin(true)) {
-    Serial.println("An Error has occurred while mounting LITTLEFS");
-    ESP.restart();
-  }
-  else {
-    delay(500);
-    Serial.println("LITTLEFS mounted successfully");
-  }
-   
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -81,7 +69,8 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
   
-   config.frame_size = FRAMESIZE_VGA;
+   //config.frame_size = FRAMESIZE_VGA;
+   config.frame_size = FRAMESIZE_SVGA;
    config.jpeg_quality = 12;
    config.fb_count = 1;
 
@@ -97,59 +86,34 @@ void setup() {
 }
 
 void loop() {
-  Serial.println("Start taking picture");
+  Serial.println("Starting ...");
   delay(5000);
-  if (! capturePhotoSaveLITTLEFS()) {
-        Serial.println("Cannot take photo" );
-        goToSleep();
+   // Take a photo with the camera
+  Serial.println("Taking a photo");
+  camera_fb_t * fb = NULL;
+  fb = esp_camera_fb_get();
+  if (!fb) {
+      Serial.println("Camera capture failed");
+      goToSleep();
   }
   
   if (! sim800lClient.waitForGsmNetwork()) {
     sim800lClient.resetGsm(GSM_RESET_PIN);
     if (! sim800lClient.waitForGsmNetwork()) {
       Serial.println("Cannot register to GSM network" );
+      esp_camera_fb_return(fb);
       goToSleep();
     }
   }
 
-  sendPhoto();
+  sendPhoto(fb);
+  esp_camera_fb_return(fb);
   goToSleep();
 }  
 
 
-// Capture Photo and Save it to LITTLEFS
-boolean capturePhotoSaveLITTLEFS( void ) {
-  camera_fb_t * fb = NULL; // pointer
-
-    // Take a photo with the camera
-    Serial.println("Taking a photo");
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      return false;
-    }
-
-    // Photo file name
-    Serial.printf("Picture file name: %s\n", FILE_PHOTO);
-    File file = LITTLEFS.open(FILE_PHOTO, FILE_WRITE);
-
-    // Insert the data in the photo file
-    if (!file) {
-      Serial.println("Failed to open file in writing mode");
-    }
-    else {
-      file.write(fb->buf, fb->len); // payload (image), payload length
-      Serial.print("The picture has been saved in ");
-      Serial.println(FILE_PHOTO);
-    }
-    // Close the file
-    file.close();
-    esp_camera_fb_return(fb);
-  return true;  
-}
-
-boolean sendPhoto(){
-  String imageFileName = String(millis()) + ".jpg";;
+boolean sendPhoto(camera_fb_t * fb){
+  String imageFileName = String(random(100000, 999999)) + ".jpg";;
 
   boolean initResult = false;
   int initRetries = 3;
@@ -165,7 +129,7 @@ boolean sendPhoto(){
   boolean ftpResult = false;
   int retries = 3;
   while (! ftpResult && retries >= 0) {  
-      ftpResult = sim800lClient.sendFileToFtp(FILE_PHOTO, imageFileName);
+      ftpResult = sim800lClient.sendFileToFtp(fb, imageFileName);
       retries--;
       if(! ftpResult){
        Serial.print("Error sending file to FTP, retrying, number of retires left : ");
