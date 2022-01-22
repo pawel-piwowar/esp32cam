@@ -1,7 +1,9 @@
 # Esp32 Cam Sim800L GSM module integration
 Sample code for sending pictures from Esp32 Cam to FTP Server using SIM 800L GSM module. 
 In this example pictures are taken in predefined periods (e.g. every 10 minutes, every hour, etc.).
-After being taken, picture is sent directly to FTP server. 
+After being taken, picture is sent directly to FTP server.
+Then Esp32 Cam sends deep sleep command to SIM 800L and activates sleep mode for itself.
+This allows achieving very low power consumption, since most of the time both modules are in sleep mode.
 
 FTP connection parameters are read from file : "ftpParams.h"
 Such file needs to be created and placed in the same directory as main program.
@@ -22,7 +24,7 @@ const String ftpPassword = "myPass1234";
 ### Wiring
 
 Esp32 Cam communicates with SIM800L using serial connection.  (Pins 14 and 15)
-Code fragment responsible fot initiating serial connection:
+Code fragment responsible for initiating serial connection:
 ```
 Serial2.begin(115200,SERIAL_8N1,14,15);
 ```
