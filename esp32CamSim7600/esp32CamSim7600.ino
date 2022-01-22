@@ -2,11 +2,10 @@
 #include "SPI.h"
 #include "driver/rtc_io.h"
 #include <FS.h>
-#include <SPIFFS.h>
 #include "ftpParams.h"
 
-#define uS_TO_S_FACTOR 1000000    //Conversion factor for micro seconds to seconds
-#define TIME_TO_SLEEP  600        //Time ESP32 will go to sleep (in seconds)
+#define uS_TO_M_FACTOR 60000000ULL    //Conversion factor for micro seconds to minutes
+#define TIME_TO_SLEEP_MINUTES  10     //Time ESP32 will go to sleep (in minutes)
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -32,28 +31,21 @@
   #error "Camera model not selected"
 #endif
 
-// Photo File Name to save in SPIFFS
-#define FILE_PHOTO "/photo.jpg"
 int gsmPowerControlPin = 2;
+int GSM_RESET_PIN = 13;
 
 
   
 void setup() {
+  pinMode(33, OUTPUT); //RED led
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
   pinMode(gsmPowerControlPin, OUTPUT);
   rtc_gpio_hold_dis(GPIO_NUM_2);
+  pinMode(GSM_RESET_PIN, OUTPUT);
+
   Serial2.begin(115200,SERIAL_8N1,14,15);
   Serial.begin(115200);
-  Serial.println();
-  
-  if (!SPIFFS.begin(true)) {
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    ESP.restart();
-  }
-  else {
-    delay(500);
-    Serial.println("SPIFFS mounted successfully");
-  }
+  Serial.println(); 
    
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -77,15 +69,11 @@ void setup() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
   
-  if(psramFound()){
-    config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 10;
-    config.fb_count = 2;
-  } else {
-    config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;
-    config.fb_count = 1;
-  }
+   //config.frame_size = FRAMESIZE_UXGA; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
+   //config.frame_size = FRAMESIZE_VGA;
+   config.frame_size = FRAMESIZE_XGA;
+   config.jpeg_quality = 12; //10-63 lower number means higher quality
+   config.fb_count = 1;
 
   // Initialize camera
   esp_err_t err = esp_camera_init(&config);
@@ -94,46 +82,110 @@ void setup() {
     return;
   }
 
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) +  " Seconds");
+  Serial.println("Setting up ESP32 to sleep every " + String(TIME_TO_SLEEP_MINUTES) +  " minutes");
+  esp_sleep_enable_timer_wakeup(uS_TO_M_FACTOR * TIME_TO_SLEEP_MINUTES);
+
 }
 
 void loop() {
+  Serial.println("Starting ...");
   delay(10000);
-  if (capturePhotoSaveSpiffs()) {
-    powerUpGsm();
-    sendPhoto();
-    powerDownGsm();
+  Serial.println("Taking a photo");
+  camera_fb_t * fb = NULL;
+  fb = esp_camera_fb_get();
+  if (!fb) {
+      Serial.println("Camera capture failed");
+      blinkRed(3, 200, 200);
+      goToSleep();
+  }
+
+  boolean gsmPowerUpOk = false;
+  for (int i=0; i<3; i++) {
+    gsmPowerUpOk = powerUpGsm();
+    if (gsmPowerUpOk) {
+      break;
+    } 
+    Serial.println("Cannot power up GSM module, hard reseting...");
+    resetGsm(GSM_RESET_PIN);
+    delay(10000);
   }  
-  Serial.print("Going to sleep for " + String(TIME_TO_SLEEP) + " seconds" );
+
+  if (! gsmPowerUpOk) {
+       Serial.println("Cannot start GSM module");
+     blinkRed(4, 200, 200);
+     esp_camera_fb_return(fb);
+     goToSleep();
+  }   
+
+  if (!waitForGsmNetwork()) {
+    resetGsm(GSM_RESET_PIN);
+    if (!waitForGsmNetwork()) {
+      Serial.println("Cannot register to GSM network" );
+      esp_camera_fb_return(fb);
+      goToSleep();
+    }
+  }
+
+  boolean sendPhotoOk = false; 
+  for (int i=0; i<3; i++) {
+    sendPhotoOk = sendPhoto(fb);
+    if (sendPhotoOk) {
+      break;
+    }
+  }
+  
+  if (! sendPhotoOk) {
+     Serial.println("Cannot send file to FTP");
+     blinkRed(5, 200, 200);
+     goToSleep();
+  }
+  blinkRed(1, 2000, 100);
+  powerDownGsm();
+  goToSleep();
+}
+
+void goToSleep(){
+  Serial.println("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
   rtc_gpio_hold_en(GPIO_NUM_2);
+  Serial.println("Sleep mode activated");
   esp_deep_sleep_start();
 }
 
-void powerUpGsm(){
-    if (checkGsmState() != 0) {
-      Serial.println("Powering up GSM module ...");
-      digitalWrite(gsmPowerControlPin, HIGH);
-          delay(500);
-      digitalWrite(gsmPowerControlPin, LOW);
-      String result = readLineFromSerial("PB DONE", 60000);
-      boolean ok = result.indexOf("PB DONE") > 0;
-      if (!ok){
-           Serial.println("Reseting GSM module ...");
-           sendATcommand("AT+CRESET","PB DONE", 60000);   
-        }
-    }     
+void resetGsm(int resetPinNum){
+      Serial.println("Resetting GSM module ...");
+      digitalWrite(resetPinNum, LOW);
+          delay(200);
+      digitalWrite(resetPinNum, HIGH);  
+} 
+
+boolean powerUpGsm(){
+    for (int i=0; i<3; i++) {
+      if (checkGsmState()) {
+         return true;
+      }  
+    }
+    Serial.println("Cannot get answer, powering up GSM module ...");
+    digitalWrite(gsmPowerControlPin, HIGH);
+    delay(500);
+    digitalWrite(gsmPowerControlPin, LOW);
+    readLineFromSerial("PB DONE", 20000);
+    for (int i=0; i<3; i++) {
+      if (checkGsmState()) {
+         return true;
+      }  
+    }
+    return false;
   }
 
-int checkGsmState(){
-    String result = sendATcommand("AT","OK",3000);
+boolean checkGsmState(){
+    String result = sendATcommand("AT","OK",5000);
     boolean ok = result.indexOf("OK") > 0;
     if (ok) {
       Serial.println("GSM module started");
-      return 0;
+      return true;
     } else {
       Serial.println("GSM module not responding");
-      return -1;
+      return false;
     }
   }
 
@@ -143,65 +195,24 @@ void powerDownGsm(){
    String result = sendATcommand("AT+CPOF","NW PDN DEACT 1", 20000);
   }
 
-// Check if photo capture was successful
-bool checkPhoto( fs::FS &fs ) {
-  File f_pic = fs.open( FILE_PHOTO );
-  Serial.print("Photo file size : ");
-  unsigned int pic_sz = f_pic.size();
-  Serial.println(pic_sz);
-  return ( pic_sz > 100 );
+boolean waitForGsmNetwork(){
+  sendATcommand("AT","OK", 5000);
+  String result;
+  for (int i=1; i < 10; i++){ //Try 10 times…
+      Serial.println("Waiting for network, attempt " + String(i) );
+      result = sendATcommand("AT+CREG?","+CREG: 0,1", 5000);
+      if (result.indexOf("+CREG: 0,1") > 0) {
+        return true;
+      }
+      delay(2000);
+  }
+  return false;
 }
 
-// Capture Photo and Save it to SPIFFS
-boolean capturePhotoSaveSpiffs( void ) {
-  camera_fb_t * fb = NULL; // pointer
-  bool ok = 0; // Boolean indicating if the picture has been taken correctly
 
-  int attemptCount=1;
-  do {
-    // Take a photo with the camera
-    Serial.print("Taking a photo, attempt nr: ");
-    Serial.println(attemptCount);
-
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      return false;
-    }
-
-    // Photo file name
-    Serial.printf("Picture file name: %s\n", FILE_PHOTO);
-    File file = SPIFFS.open(FILE_PHOTO, FILE_WRITE);
-
-    // Insert the data in the photo file
-    if (!file) {
-      Serial.println("Failed to open file in writing mode");
-    }
-    else {
-      file.write(fb->buf, fb->len); // payload (image), payload length
-      Serial.print("The picture has been saved in ");
-      Serial.print(FILE_PHOTO);
-      Serial.print(" - Size: ");
-      Serial.print(file.size());
-      Serial.println(" bytes");
-    }
-    // Close the file
-    file.close();
-    esp_camera_fb_return(fb);
-
-    // check if file has been correctly saved in SPIFFS
-    ok = checkPhoto(SPIFFS);
-    attemptCount++;
-  } while ( !ok && attemptCount <=10 );
-  if (! ok) {
-     Serial.print("Cannot take a picture");
-    }
-  return ok;  
-}
-
-boolean sendPhoto(){
+boolean sendPhoto(camera_fb_t * fb){
   String imageFileName = getFileNameFromTimeResp();
-  if (!sendFileToEFS(imageFileName)){
+  if (!sendFileToEFS(imageFileName, fb)){
     Serial.println("Error while sending file to EFS. Is SD card ok ?"); 
     return false;
   };
@@ -288,12 +299,11 @@ int sendFileToFtp(String imageFileName){
   return resultCode;
 }
 
-boolean sendFileToEFS(String imageFileName) {
-    Serial.print("Start reading file from SPIFFS , file name: ");
-    Serial.println(FILE_PHOTO);
-    File dataFile = SPIFFS.open(FILE_PHOTO, FILE_READ);
-    Serial.println("File opened");
-    int len = dataFile.size();
+boolean sendFileToEFS(String imageFileName, camera_fb_t * fb) {
+
+    uint8_t *fbBuf = fb->buf;
+    size_t len = fb->len;
+    
     Serial.print("File length: ");
     Serial.println(len);
     String uploadCommand = "AT+CFTRANRX=";
@@ -303,20 +313,8 @@ boolean sendFileToEFS(String imageFileName) {
     String resp = Serial2.readString();
     Serial.println(resp);
 
-  int counter = 0;
-  if (dataFile) {
-    unsigned long startTime = millis();
-    while (dataFile.available() && (millis() - startTime < 30000) ) {
-      Serial2.write(dataFile.read());
-      counter++;
-    }
-    dataFile.close();
-  }
-  else {
-    Serial.println("error opening file");
-  }
-  Serial.print("Bytes sent: ");
-  Serial.println(counter);
+    Serial2.write(fbBuf, len);
+
   String sendResp = readLineFromSerial("OK", 60000);
   if (sendResp.indexOf("OK") > 0 ) {
     return true;
@@ -348,4 +346,13 @@ String sendATcommand(String toSend, String expectedResponse, unsigned long milli
   Serial2.println(toSend);
   String result = readLineFromSerial(expectedResponse, milliseconds);
 return result;
+}
+
+void blinkRed(int count, int onTime, int offTime) {
+  for (int i = 1; i <= count; i++) {
+    digitalWrite(33, LOW); // RED diode on 
+    delay(onTime);
+    digitalWrite(33, HIGH); // RED diode off 
+    delay(offTime);
+  }  
 }
