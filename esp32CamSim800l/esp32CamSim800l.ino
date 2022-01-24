@@ -5,8 +5,9 @@
 #include "ftpParams.h"
 #include "Sim800lClient.h"
 
-#define uS_TO_M_FACTOR 60000000ULL    //Conversion factor for micro seconds to minutes
-#define TIME_TO_SLEEP_MINUTES  10     //Time ESP32 will go to sleep (in minutes)
+#define uS_TO_M_FACTOR 60000000ULL    // Conversion factor for micro seconds to minutes
+#define TIME_TO_SLEEP_MINUTES  10     // Time ESP32 will go to sleep (in minutes)
+#define MIN_FILE_SIZE_TO_SEND 16000   // Pictures with size below this value will not be sent to FTP server (e.g dark images taken during the night).
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -37,7 +38,7 @@ Sim800lClient sim800lClient;
 
   
 void setup() {
-  pinMode(33, OUTPUT);
+  pinMode(33, OUTPUT); //RED led
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
   pinMode(GSM_RESET_PIN, OUTPUT);
   digitalWrite(GSM_RESET_PIN, HIGH);
@@ -68,10 +69,11 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  
+
+   //config.frame_size = FRAMESIZE_UXGA; // FRAMESIZE_ + QVGA|CIF|VGA|SVGA|XGA|SXGA|UXGA
    //config.frame_size = FRAMESIZE_VGA;
    config.frame_size = FRAMESIZE_SVGA;
-   config.jpeg_quality = 12;
+   config.jpeg_quality = 12; //10-63 lower number means higher quality
    config.fb_count = 1;
 
   // Initialize camera
@@ -87,7 +89,7 @@ void setup() {
 
 void loop() {
   Serial.println("Starting ...");
-  delay(5000);
+  delay(10000);
    // Take a photo with the camera
   Serial.println("Taking a photo");
   camera_fb_t * fb = NULL;
@@ -96,59 +98,62 @@ void loop() {
       Serial.println("Camera capture failed");
       goToSleep();
   }
-  
-  if (! sim800lClient.waitForGsmNetwork()) {
-    sim800lClient.resetGsm(GSM_RESET_PIN);
-    if (! sim800lClient.waitForGsmNetwork()) {
-      Serial.println("Cannot register to GSM network" );
+
+  size_t fbLen = fb->len;
+  Serial.println("Captured image size: " + String(fbLen));
+  if (fbLen < MIN_FILE_SIZE_TO_SEND) {
+      Serial.println("Captured image size to small to send (dark image ? ). Defined minimal :  " + String(MIN_FILE_SIZE_TO_SEND));
       esp_camera_fb_return(fb);
       goToSleep();
-    }
   }
 
-  sendPhoto(fb);
+  boolean photoSent = false;
+  for (int i=1; i<=3; i++) {
+    Serial.println("Sending photo, attempt no: " + String(i) );
+    photoSent = sendPhoto(fb);
+    if (photoSent) {
+      Serial.println("Photo sent in " + String(i) + " attempt");
+      break;
+    }
+    Serial.println("Error while sending photo, reseting GSM ...");
+    sim800lClient.resetGsm(GSM_RESET_PIN);
+    delay(10000);
+  }  
+  
   esp_camera_fb_return(fb);
+  sim800lClient.goToSleep();
   goToSleep();
 }  
 
 
 boolean sendPhoto(camera_fb_t * fb){
-  String imageFileName = String(random(100000, 999999)) + ".jpg";;
 
-  boolean initResult = false;
-  int initRetries = 3;
-  while (! initResult && initRetries >= 0) {
-       initResult = sim800lClient.initFtp(ftpServerAddress, ftpServerPort, ftpUser, ftpPassword);
-       initRetries --;
-       if (! initResult) {
-          Serial.println("Error while connecting to FTP");
-          sim800lClient.stopFtp();
-       }   
+ if (! sim800lClient.waitForGsmNetwork()) {
+      Serial.println("Cannot register to GSM network" );
+      return false;
   }
   
-  boolean ftpResult = false;
-  int retries = 3;
-  while (! ftpResult && retries >= 0) {  
-      ftpResult = sim800lClient.sendFileToFtp(fb, imageFileName);
-      retries--;
-      if(! ftpResult){
-       Serial.print("Error sending file to FTP, retrying, number of retires left : ");
-       Serial.println(retries); 
-      }
-    }
-    
-  sim800lClient.stopFtp();
-  if (ftpResult){
-    return true;
-  } else {
-    Serial.println("Cannot send file to FTP");
+
+  if (!sim800lClient.initFtp(ftpServerAddress, ftpServerPort, ftpUser, ftpPassword)) {
+     Serial.println("Error while connecting to FTP");
+     sim800lClient.stopFtp();
      return false;
-  }
+  }   
+
+  String imageFileName = String(random(100000, 999999)) + ".jpg";
+  if(!sim800lClient.sendFileToFtp(fb, imageFileName)){
+       Serial.print("Error sending file to FTP, retrying, number of retires left : ");
+       sim800lClient.stopFtp();
+       return false;
+   }
+   
+  sim800lClient.stopFtp();
+  return true;
+
 }
 
 void goToSleep(){
   Serial.println("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
-  sim800lClient.goToSleep();
   rtc_gpio_hold_en(GPIO_NUM_2);
   Serial.println("Sleep mode activated");
   esp_deep_sleep_start();

@@ -40,7 +40,7 @@ boolean Sim800lClient::initFtp(String _ftpServerAddress, int _ftpServerPort, Str
   ftpUser = _ftpUser;
   ftpPassword = _ftpPassword;
   sendATcommand("AT+CSQ","+CSQ:", 2000);
-  String response = sendATcommand("AT+SAPBR=1,1","OK", 5000);
+  String response = sendATcommand("AT+SAPBR=1,1","OK", 10000);
   if (response.indexOf("OK") <= 0) {
     return false;
   }
@@ -71,14 +71,14 @@ void Sim800lClient::stopFtp(void){
 }
 
 boolean Sim800lClient::sendFileToFtp(camera_fb_t * fb, String remoteFileName){
-  String response = sendATcommand(String("AT+FTPPUTNAME=") + remoteFileName ,"OK",2000);
-  response = sendATcommand("AT+FTPCID=1" ,"OK",2000);
-  response = sendATcommand("AT+FTPPUTPATH=\"/\"" ,"OK",2000);
-  response = sendATcommand("AT+FTPPUT=1","+FTPPUT: 1",5000);
+  String response = sendATcommand(String("AT+FTPPUTNAME=") + remoteFileName ,"OK",5000);
+  response = sendATcommand("AT+FTPCID=1" ,"OK",5000);
+  response = sendATcommand("AT+FTPPUTPATH=\"/\"" ,"OK",5000);
+  response = sendATcommand("AT+FTPPUT=1","+FTPPUT: 1",10000);
   String putOkResp = "+FTPPUT: 1,1,";
   int putOkRespIndex = response.indexOf(putOkResp);
   if ( putOkRespIndex <= 0) {
-    blinkRed(3, 100, 100);
+    blinkRed(5, 200, 200);
     Serial.println("FTP PUT error: " + response);
     return false;
     }
