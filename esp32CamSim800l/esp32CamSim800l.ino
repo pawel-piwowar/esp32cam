@@ -115,7 +115,7 @@ void loop() {
       Serial.println("Photo sent in " + String(i) + " attempt");
       break;
     }
-    Serial.println("Error while sending photo, reseting GSM ...");
+    Serial.println("Error while sending photo, resetting GSM ...");
     sim800lClient.resetGsm(GSM_RESET_PIN);
     delay(10000);
   }  
