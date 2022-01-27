@@ -6,7 +6,7 @@
 #include "Sim800lClient.h"
 
 #define uS_TO_M_FACTOR 60000000ULL    // Conversion factor for micro seconds to minutes
-#define TIME_TO_SLEEP_MINUTES  10     // Time ESP32 will go to sleep (in minutes)
+#define TIME_TO_SLEEP_MINUTES  60     // Time ESP32 will go to sleep (in minutes)
 #define MIN_FILE_SIZE_TO_SEND 16000   // Pictures with size below this value will not be sent to FTP server (e.g dark images taken during the night).
 
 #define CAMERA_MODEL_AI_THINKER
@@ -140,7 +140,10 @@ boolean sendPhoto(camera_fb_t * fb){
      return false;
   }   
 
-  String imageFileName = String(random(100000, 999999)) + ".jpg";
+  String imageFileName = String(random(100000, 999999));
+  imageFileName += "_volt_" + sim800lClient.getBatteryVoltage();
+  imageFileName += "_sig_" + sim800lClient.getSignalStrength(); 
+  imageFileName += ".jpg";
   if(!sim800lClient.sendFileToFtp(fb, imageFileName)){
        Serial.print("Error sending file to FTP, retrying, number of retires left : ");
        sim800lClient.stopFtp();

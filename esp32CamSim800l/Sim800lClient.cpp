@@ -39,7 +39,6 @@ boolean Sim800lClient::initFtp(String _ftpServerAddress, int _ftpServerPort, Str
   ftpServerPort =  _ftpServerPort;
   ftpUser = _ftpUser;
   ftpPassword = _ftpPassword;
-  sendATcommand("AT+CSQ","+CSQ:", 2000);
   String response = sendATcommand("AT+SAPBR=1,1","OK", 10000);
   if (response.indexOf("OK") <= 0) {
     return false;
@@ -130,6 +129,23 @@ boolean Sim800lClient::sendDataPage(uint8_t *fbBuf, size_t len){
    Serial2.write(fbBuf, len);
 }
 
+String Sim800lClient::getBatteryVoltage(void) {
+  String response = sendATcommand("AT+CBC","OK", 5000); 
+  int voltStartIndex = response.lastIndexOf(",") + 1;
+  String voltageStr = response.substring(voltStartIndex, voltStartIndex + 4);
+  float voltageFloat = voltageStr.toFloat() / 1000;
+  Serial.println("Voltage: " + String(voltageFloat, 2));
+  return voltageStr;
+}
+
+String Sim800lClient::getSignalStrength(void) {
+  String response =   sendATcommand("AT+CSQ","+CSQ:", 5000);
+  int startIndex = response.lastIndexOf(":") + 2;
+  String signalStr = response.substring(startIndex, startIndex + 2);
+  Serial.println("Signal Strength: " + signalStr);
+  return signalStr;
+}
+
 
 String Sim800lClient::readLineFromSerial(String stringToRead, unsigned long timeoutMillis){
     String result;
@@ -160,6 +176,7 @@ String Sim800lClient::sendATcommand(String toSend, String expectedResponse, unsi
   String result = readLineFromSerial(expectedResponse, milliseconds);
 return result;
 }
+
 
 void Sim800lClient::blinkRed(int count, int onTime, int offTime) {
   for (int i = 1; i <= count; i++) {
