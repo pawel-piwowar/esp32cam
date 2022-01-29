@@ -85,14 +85,17 @@ void setup() {
 
   Serial.println("Setting up ESP32 to sleep every " + String(TIME_TO_SLEEP_MINUTES) +  " minutes");
   esp_sleep_enable_timer_wakeup(uS_TO_M_FACTOR * TIME_TO_SLEEP_MINUTES);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_13, 0);
+  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_13, 0);
 }
 
 void loop() {
   digitalWrite(33, LOW); // RED diode on 
-  printWakeupReason();
-  //Serial.println("Starting ...");
-  //delay(10000);
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+  if ( wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("Starting ...");
+    delay(10000);
+  }
+  printWakeupReason(wakeup_reason);
    // Take a photo with the camera
   Serial.println("Taking a photo");
   camera_fb_t * fb = NULL;
@@ -128,8 +131,7 @@ void loop() {
   goToSleep();
 }  
 
-void printWakeupReason(void){
-    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+void printWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason){
     switch(wakeup_reason)
   {
     case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
