@@ -85,11 +85,14 @@ void setup() {
 
   Serial.println("Setting up ESP32 to sleep every " + String(TIME_TO_SLEEP_MINUTES) +  " minutes");
   esp_sleep_enable_timer_wakeup(uS_TO_M_FACTOR * TIME_TO_SLEEP_MINUTES);
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_13, 0);
 }
 
 void loop() {
-  Serial.println("Starting ...");
-  delay(10000);
+  digitalWrite(33, LOW); // RED diode on 
+  printWakeupReason();
+  //Serial.println("Starting ...");
+  //delay(10000);
    // Take a photo with the camera
   Serial.println("Taking a photo");
   camera_fb_t * fb = NULL;
@@ -125,6 +128,20 @@ void loop() {
   goToSleep();
 }  
 
+void printWakeupReason(void){
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    switch(wakeup_reason)
+  {
+    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
+    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
+    case ESP_SLEEP_WAKEUP_GPIO : Serial.println("Wakeup caused by GPIO"); break;
+    case ESP_SLEEP_WAKEUP_UART : Serial.println("Wakeup caused by UART"); break;
+    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
+  }
+}
 
 boolean sendPhoto(camera_fb_t * fb){
 
@@ -140,9 +157,12 @@ boolean sendPhoto(camera_fb_t * fb){
      return false;
   }   
 
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+
   String imageFileName = String(random(100000, 999999));
   imageFileName += "_volt_" + sim800lClient.getBatteryVoltage();
   imageFileName += "_sig_" + sim800lClient.getSignalStrength(); 
+  imageFileName += "_" + String(wakeup_reason);
   imageFileName += ".jpg";
   if(!sim800lClient.sendFileToFtp(fb, imageFileName)){
        Serial.print("Error sending file to FTP, retrying, number of retires left : ");
