@@ -70,7 +70,7 @@ void Sim800lClient::stopFtp(void){
 }
 
 boolean Sim800lClient::sendFileToFtp(camera_fb_t * fb, String remoteFileName){
-  String response = sendATcommand(String("AT+FTPPUTNAME=") + remoteFileName ,"OK",5000);
+  String response = sendATcommand(String("AT+FTPPUTNAME=") +  "\"" + remoteFileName + "\"" ,"OK",5000);
   response = sendATcommand("AT+FTPCID=1" ,"OK",5000);
   response = sendATcommand("AT+FTPPUTPATH=\"/\"" ,"OK",5000);
   response = sendATcommand("AT+FTPPUT=1","+FTPPUT: 1",10000);
