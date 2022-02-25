@@ -6,9 +6,14 @@
 #include "Sim800lClient.h"
 
 #define uS_TO_M_FACTOR 60000000ULL    // Conversion factor for micro seconds to minutes
-#define TIME_TO_SLEEP_MINUTES  60     // Time ESP32 will go to sleep (in minutes)
-#define MIN_FILE_SIZE_TO_SEND 16000   // Pictures with size below this value will not be sent to FTP server (e.g dark images taken during the night).
+
 #define CLIENT_ID "B" // client id added to picture file name 
+#define TIME_TO_SLEEP_MINUTES  300     // Time ESP32 will go to sleep in minutes
+#define PIR_SENSOR_ENABLED false // set to true if PIR sensor is connected to PIN 13
+#define UART_WAKEUP_ENABLED false // set to true if ESP32 should wakeup on serial UART data
+#define LIGTH_SLEEP false // if set to true light sleep is used (required by UART wakeup), if false : deep sleep 
+#define SKIP_SMALL_FILES true        // set to true if files below given size should be skipped
+#define MIN_FILE_SIZE_TO_SEND 16000   // Pictures with size below this value will not be sent to FTP server (e.g dark images taken during the night).
 
 #define CAMERA_MODEL_AI_THINKER
 
@@ -44,6 +49,7 @@ void setup() {
   pinMode(GSM_RESET_PIN, OUTPUT);
   digitalWrite(GSM_RESET_PIN, HIGH);
   rtc_gpio_hold_dis(GPIO_NUM_2);
+  rtc_gpio_hold_dis(GPIO_NUM_13);
   
   Serial2.begin(115200,SERIAL_8N1,14,15);
   Serial.begin(115200);
@@ -86,17 +92,34 @@ void setup() {
 
   Serial.println("Setting up ESP32 to sleep every " + String(TIME_TO_SLEEP_MINUTES) +  " minutes");
   esp_sleep_enable_timer_wakeup(uS_TO_M_FACTOR * TIME_TO_SLEEP_MINUTES);
-  //esp_sleep_enable_ext0_wakeup(GPIO_NUM_13, 0);
+  if (PIR_SENSOR_ENABLED) {
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_13, 0);
+  }  
+
+  if (UART_WAKEUP_ENABLED) {
+    gpio_wakeup_enable(GPIO_NUM_14, GPIO_INTR_HIGH_LEVEL);
+    esp_sleep_enable_gpio_wakeup();;
+  } 
+  
 }
 
 void loop() {
   digitalWrite(33, LOW); // RED diode on 
   esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-  if ( wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
-    Serial.println("Starting ...");
-    delay(10000);
-  }
   printWakeupReason(wakeup_reason);
+
+  if ( wakeup_reason == ESP_SLEEP_WAKEUP_TIMER || wakeup_reason == 0) {
+    Serial.println("Starting ...");
+    delay(60000);
+  } else {
+    setupCamera();
+  }
+  if ( wakeup_reason == ESP_SLEEP_WAKEUP_GPIO) {
+     if (Serial2.available()>0){
+        Serial.write(Serial2.read());
+    }
+  }
+
    // Take a photo with the camera
   Serial.println("Taking a photo");
   camera_fb_t * fb = NULL;
@@ -104,14 +127,16 @@ void loop() {
   if (!fb) {
       Serial.println("Camera capture failed");
       goToSleep();
+      return;
   }
 
   size_t fbLen = fb->len;
   Serial.println("Captured image size: " + String(fbLen));
-  if (fbLen < MIN_FILE_SIZE_TO_SEND) {
+  if (SKIP_SMALL_FILES && fbLen < MIN_FILE_SIZE_TO_SEND) {
       Serial.println("Captured image size to small to send (dark image ? ). Defined minimal :  " + String(MIN_FILE_SIZE_TO_SEND));
       esp_camera_fb_return(fb);
       goToSleep();
+      return;
   }
 
   boolean photoSent = false;
@@ -131,6 +156,13 @@ void loop() {
   sim800lClient.goToSleep();
   goToSleep();
 }  
+
+void setupCamera(void){
+  sensor_t * s = esp_camera_sensor_get();
+  s->set_whitebal(s, 1);       // 0 = disable , 1 = enable
+  s->set_awb_gain(s, 1);       // 0 = disable , 1 = enable
+  s->set_wb_mode(s, 1);        // 0 to 4 - if awb_gain enabled (0 - Auto, 1 - Sunny, 2 - Cloudy, 3 - Office, 4 - Home)
+}
 
 void printWakeupReason(esp_sleep_wakeup_cause_t wakeup_reason){
     switch(wakeup_reason)
@@ -182,6 +214,13 @@ boolean sendPhoto(camera_fb_t * fb){
 void goToSleep(){
   Serial.println("Going to sleep for " + String(TIME_TO_SLEEP_MINUTES) + " minutes" );
   rtc_gpio_hold_en(GPIO_NUM_2);
+  rtc_gpio_hold_en(GPIO_NUM_13);
+  Serial2.flush();
   Serial.println("Sleep mode activated");
-  esp_deep_sleep_start();
+
+  if (LIGTH_SLEEP) {
+    esp_light_sleep_start();
+  } else {
+    esp_deep_sleep_start();
+  }  
 }
